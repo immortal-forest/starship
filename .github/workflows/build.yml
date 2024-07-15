@@ -1,0 +1,67 @@
+name:  Build
+
+on:
+  push:
+    branches:
+      - master
+
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'info'
+        type: choice
+        options:
+        - info
+        - warning
+        - debug
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and release
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: starship-x86_64-unknown-linux-gnu.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get release version
+        shell: bash
+        run: echo "VERSION=$(grep '^version =' Cargo.toml|head -n1|cut -d\" -f2).$(git rev-list --count HEAD).g$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          
+      - name: Setup | Install cross [Linux]
+        if: matrix.os == 'ubuntu-latest'
+        uses: taiki-e/install-action@cross
+
+      - name: Build | Build [Cross]
+        if: matrix.os == 'ubuntu-latest'
+        run: cross build --release --locked --target ${{ matrix.target }}
+
+      - name: Build | Archive
+        shell: bash
+        run: | 
+          mkdir "${{ matrix.target }}"
+          mkdir "${{ matrix.target }}/completions"
+          cp target/${{ matrix.target }}/release/starship "${{ matrix.target }}/starship"
+          target/${{ matrix.target }}/release/starship completions bash > "${{ matrix.target }}"/completions/starship
+          target/${{ matrix.target }}/release/starship completions fish > "${{ matrix.target }}"/completions/starship.fish
+          target/${{ matrix.target }}/release/starship completions zsh > "${{ matrix.target }}"/completions/_starship
+          
+          tar -czf "${{ matrix.name }}" "${{ matrix.target }}"
+
+      - name: Release | New release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: starship-*
+          tag_name: "v${{ env.VERSION }}"
